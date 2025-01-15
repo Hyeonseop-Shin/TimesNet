@@ -76,3 +76,63 @@ class TimesBlock(nn.Module):
         # residual connection
         result = result + x
         return result
+
+
+class Model(nn.Module):
+    def __init__(self, configs):
+        super(Model, self).__init__()
+
+        self.configs = configs
+        self.task_name = configs.task_name
+        self.seq_len = configs.seq_len
+        self.label_len = configs.label_len
+        self.pred_len = configs.pred_len
+        self.model = nn.ModuleList([TimesBlock(configs)
+                                    for _ in range(configs.e_layers)])
+        self.enc_embedding = DataEmbedding(c_in=configs.enc_in,
+                                           d_model=configs.d_model,
+                                           embed_type=configs.embed,
+                                           freq=configs.freq,
+                                           droupout=configs.dropout)
+        self.layer = configs.e_layers
+        self.layer_norm = nn.LayerNorm(configs.d_model)
+
+        if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
+            self.predict_linear = nn.Linear(in_features=self.seq_len,
+                                            out_features=(self.pred_len + self.seq_len))
+            self.projection = nn.Linear(in_features=configs.d_model,
+                                        out_features=configs.c_out,
+                                        bias=True)
+    
+    def forecast(self, x_enc, x_mark_enc):
+        # Normalization from Non-stationary Transformer
+        means = x_enc.mean(1, keepdim=True).detach()
+        x_enc = x_enc - means
+        stdev = torch.sqrt(torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
+        x_enc /= stdev
+
+        # Embedding
+        enc_out = self.enc_embedding(x_enc, x_mark_enc) # (B, T, C)
+        enc_out = self.predict_linear(enc_out.permute(0, 2, 1)).permute(0, 2, 1)    # Align temporal dimension
+
+        # TimesNet
+        for i in range(self.layer):
+            enc_out = self.layer_norm(self.model[i](enc_out))
+
+        # Project back
+        dec_out = self.projection(enc_out)
+
+        # De-Normalization from Non-stationary Transformer
+        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(
+                                1, self.pred_len + self.seq_len, 1))
+        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(
+                                1, self.pred_len + self.seq_len, 1))
+        
+        return dec_out
+    
+
+    def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
+        if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
+            dec_out = self.forecast(x_enc=x_enc, x_mark_enc=x_mark_enc)
+
+            return dec_out[:, -self.pred_len:, :]   # (B, L, D)
