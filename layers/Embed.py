@@ -35,7 +35,7 @@ class TokenEmbedding(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
-                nn.init.kaiming_normal_(m.weight, mode='fain_in', nonlinearity='leaky_relu') 
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu') 
 
     def forward(self, x):
         x = self.tokenConv(x.permute(0, 2, 1)).transpose(1, 2)  # originally (N, T, C), permute to (N, C, T) first and get back after conv

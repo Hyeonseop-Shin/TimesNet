@@ -29,12 +29,12 @@ class TimesBlock(nn.Module):
 
         # parameter effiecient design
         self.conv = nn.Sequential(
-            Inception_Block_V1(configs.d_model,
-                               configs.d_ff,
-                               num_kernels=configs.num_kernls),
+            Inception_Block_V1(in_channels=configs.d_model,
+                               out_channels=configs.d_ff,
+                               num_kernels=configs.num_kernels),
             nn.GELU(),
-            Inception_Block_V1(configs.d_ff,
-                               configs.d_model,
+            Inception_Block_V1(in_channels=configs.d_ff,
+                               out_channels=configs.d_model,
                                num_kernels=configs.num_kernels)
         )
     
@@ -69,7 +69,7 @@ class TimesBlock(nn.Module):
         result = torch.stack(result, dim=-1)
 
         # adaptive regression
-        period_weight = F.softmax(period_weight, dim=-1)
+        period_weight = F.softmax(period_weight, dim=1)
         period_weight = period_weight.unsqueeze(1).unsqueeze(1).repeat(1, T, N, 1)
         result = torch.sum(result * period_weight, -1)
 
@@ -125,7 +125,7 @@ class Model(nn.Module):
         # De-Normalization from Non-stationary Transformer
         dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(
                                 1, self.pred_len + self.seq_len, 1))
-        dec_out = dec_out * (stdev[:, 0, :].unsqueeze(1).repeat(
+        dec_out = dec_out * (means[:, 0, :].unsqueeze(1).repeat(
                                 1, self.pred_len + self.seq_len, 1))
         
         return dec_out
